@@ -72,10 +72,10 @@ function getQuery(
   return queryString(queryObj)
 }
 
-function getHeaders(body?: string, init?: HeadersInit) {
+function getHeaders(hasBody: boolean, init?: HeadersInit) {
   const headers = new Headers(init)
 
-  if (body !== undefined && !headers.has('Content-Type')) {
+  if (hasBody && !headers.has('Content-Type')) {
     headers.append('Content-Type', 'application/json')
   }
 
@@ -86,10 +86,17 @@ function getHeaders(body?: string, init?: HeadersInit) {
   return headers
 }
 
-function getBody(method: Method, payload: any) {
-  const body = sendBody(method) ? JSON.stringify(payload) : undefined
-  // if delete don't send body if empty
-  return method === 'delete' && body === '{}' ? undefined : body
+function getBody(payload: any, headers?: Headers) {
+  if (headers?.get("content-type")?.startsWith("application/json")) {
+    return JSON.stringify(payload)
+  }
+
+  if (payload instanceof FormData) {
+    // let the browser set the content type if body is FormData
+    headers?.delete("content-type")
+  }
+
+  return payload
 }
 
 function mergeRequestInit(
@@ -109,19 +116,10 @@ function mergeRequestInit(
 }
 
 function getFetchParams(request: Request) {
-  // clone payload
-  // if body is a top level array [ 'a', 'b', param: value ] with param values
-  // using spread [ ...payload ] returns [ 'a', 'b' ] and skips custom keys
-  // cloning with Object.assign() preserves all keys
-  const payload = Object.assign(
-    Array.isArray(request.payload) ? [] : {},
-    request.payload,
-  )
-
-  const path = getPath(request.path, payload)
-  const query = getQuery(request.method, payload, request.queryParams)
-  const body = getBody(request.method, payload)
-  const headers = getHeaders(body, request.init?.headers)
+  const path = getPath(request.path, request.payload)
+  const query = getQuery(request.method, request.payload, request.queryParams)
+  const headers = getHeaders(request.payload != null, request.init?.headers)
+  const body = getBody(request.payload, headers)
   const url = request.baseUrl + path + query
 
   const init = {
@@ -142,12 +140,7 @@ async function getResponseData(response: Response) {
   if (contentType && contentType.indexOf('application/json') !== -1) {
     return await response.json()
   }
-  const text = await response.text()
-  try {
-    return JSON.parse(text)
-  } catch (e) {
-    return text
-  }
+  return await response.blob()
 }
 
 async function fetchJson(url: string, init: RequestInit): Promise<ApiResponse> {
